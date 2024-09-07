@@ -9,6 +9,7 @@ askama = "0.12.1"
 blake3 = "1.5.4"
 bundler = { workspace = true }
 clap = { version = "4.5.16", features = ["derive"] }
+derive_builder = "0.20.1"
 dialoguer = { version = "0.11.0", features = [
     "completion",
     "fuzzy-matcher",
