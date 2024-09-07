@@ -666,6 +666,7 @@ dependencies = [
  "clap",
  "derive_builder",
  "dialoguer",
+ "dino-macros",
  "enum_dispatch",
  "git2",
  "glob",
@@ -673,6 +674,16 @@ dependencies = [
  "rquickjs-macro",
  "tokio",
  "typed-builder",
+]
+
+[[package]]
+name = "dino-macros"
+version = "0.1.0"
+dependencies = [
+ "darling",
+ "proc-macro2 1.0.86",
+ "quote 1.0.37",
+ "syn 2.0.77",
 ]
 
 [[package]]
