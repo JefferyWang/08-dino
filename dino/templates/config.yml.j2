@@ -1,7 +1,7 @@
 ---
 name: {{ name }}
-route:
+routes:
   # example routes
-  - path: /papi/hello
-    method: GET
-    handler: hello
+  /papi/hello:
+    - method: GET
+      handler: hello
