@@ -1,6 +1,7 @@
 mod config;
 mod engine;
 mod error;
+mod middleware;
 mod router;
 
 use std::collections::HashMap;
@@ -16,6 +17,7 @@ use axum::{
 use dashmap::DashMap;
 use indexmap::IndexMap;
 use matchit::Match;
+use middleware::ServerTimeLayer;
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -50,6 +52,7 @@ pub async fn start_server(port: u16, router: Vec<TenentRouter>) -> Result<()> {
     let state = AppState::new(map);
     let app = Router::new()
         .route("/*path", any(handler))
+        .layer(ServerTimeLayer)
         .with_state(state);
 
     axum::serve(listener, app.into_make_service()).await?;
@@ -69,6 +72,8 @@ async fn handler(
     let matched = router.match_it(parts.method.clone(), parts.uri.path())?;
     let req = assemble_req(&matched, &parts, query, body)?;
     let handler = matched.value;
+    // TODO: build a worker pool, and send req via mpsc channel and get res from oneshot channel
+    // but if code changed we need to recreate the worker pool
     let worker = JsWorker::try_new(&router.code)?;
     let res = worker.run(handler, req)?;
 
