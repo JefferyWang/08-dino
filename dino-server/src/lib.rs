@@ -2,9 +2,10 @@ mod config;
 mod engine;
 mod error;
 mod middleware;
+mod pool;
 mod router;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     body::Bytes,
@@ -21,11 +22,12 @@ use middleware::ServerTimeLayer;
 use tokio::net::TcpListener;
 use tracing::info;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 pub use config::*;
 pub use engine::*;
 pub use error::*;
+pub use pool::*;
 pub use router::*;
 
 type ProjectRoutes = IndexMap<String, Vec<ProjectRoute>>;
@@ -34,6 +36,7 @@ type ProjectRoutes = IndexMap<String, Vec<ProjectRoute>>;
 pub struct AppState {
     // key is hostname
     router: DashMap<String, SwappalbeAppRouter>,
+    worker_pool: Arc<WorkerPool>,
 }
 
 #[derive(Clone)]
@@ -49,7 +52,10 @@ pub async fn start_server(port: u16, router: Vec<TenentRouter>) -> Result<()> {
     for TenentRouter { host, router } in router {
         map.insert(host, router);
     }
-    let state = AppState::new(map);
+
+    let worker_pool = WorkerPool::new(12);
+
+    let state = AppState::new(map, worker_pool);
     let app = Router::new()
         .route("/*path", any(handler))
         .layer(ServerTimeLayer)
@@ -68,21 +74,35 @@ async fn handler(
     Query(query): Query<HashMap<String, String>>,
     body: Option<Bytes>,
 ) -> Result<impl IntoResponse, AppError> {
-    let router = get_router_by_host(host, state)?;
+    let router = get_router_by_host(host, state.clone())?;
     let matched = router.match_it(parts.method.clone(), parts.uri.path())?;
-    let req = assemble_req(&matched, &parts, query, body)?;
+    let req: Req = assemble_req(&matched, &parts, query, body)?;
     let handler = matched.value;
     // TODO: build a worker pool, and send req via mpsc channel and get res from oneshot channel
     // but if code changed we need to recreate the worker pool
-    let worker = JsWorker::try_new(&router.code)?;
-    let res = worker.run(handler, req)?;
+    // let worker = JsWorker::try_new(&router.code)?;
+    // let res = worker.run(handler, req)?;
 
-    Ok(Response::from(res))
+    let (sender, receiver) = oneshot::channel();
+    let params = Params::new(router.code.clone(), handler.to_string(), req, sender);
+    state
+        .worker_pool
+        .sender
+        .send(params)
+        .map_err(|e| anyhow!("send failed, {:?}", e));
+
+    match receiver.recv() {
+        Ok(res) => Ok(Response::from(res?)),
+        Err(e) => Err(anyhow!("{:?}", e).into()),
+    }
 }
 
 impl AppState {
-    pub fn new(router: DashMap<String, SwappalbeAppRouter>) -> Self {
-        Self { router }
+    pub fn new(router: DashMap<String, SwappalbeAppRouter>, worker_pool: WorkerPool) -> Self {
+        Self {
+            router,
+            worker_pool: Arc::new(worker_pool),
+        }
     }
 }
 
